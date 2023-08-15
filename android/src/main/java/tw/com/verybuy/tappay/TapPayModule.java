@@ -1,5 +1,8 @@
 package tw.com.verybuy.tappay;
 
+import android.preference.PreferenceManager;
+
+import com.facebook.react.bridge.ActivityEventListener;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
@@ -8,11 +11,12 @@ import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.uimanager.IllegalViewOperationException;
 
-
 import java.util.HashMap;
 
 import tech.cherri.tpdirect.api.TPDCard;
 
+import tech.cherri.tpdirect.api.TPDGooglePay;
+import tech.cherri.tpdirect.callback.TPDGooglePayListener;
 import tech.cherri.tpdirect.callback.dto.TPDCardInfoDto;
 import tech.cherri.tpdirect.callback.TPDCardGetPrimeSuccessCallback;
 import tech.cherri.tpdirect.callback.TPDGetPrimeFailureCallback;
@@ -26,9 +30,20 @@ import tech.cherri.tpdirect.api.TPDLinePay;
 import tech.cherri.tpdirect.api.TPDServerType;
 import tech.cherri.tpdirect.callback.TPDLinePayResultListener;
 import tech.cherri.tpdirect.exception.TPDLinePayException;
+import tech.cherri.tpdirect.api.TPDConsumer;
+import tech.cherri.tpdirect.api.TPDGooglePay;
+import tech.cherri.tpdirect.api.TPDMerchant;
 
+import com.google.android.gms.common.api.Status;
+import com.google.android.gms.wallet.AutoResolveHelper;
+import com.google.android.gms.wallet.PaymentData;
+import com.google.android.gms.wallet.TransactionInfo;
+import com.google.android.gms.wallet.WalletConstants;
 
-public class TapPayModule extends ReactContextBaseJavaModule {
+import android.app.Activity;
+import android.content.Intent;
+
+public class TapPayModule extends ReactContextBaseJavaModule implements ActivityEventListener {
 
     private final ReactApplicationContext reactContext;
     private TPDCard tpdCard;
@@ -37,6 +52,16 @@ public class TapPayModule extends ReactContextBaseJavaModule {
     private String dueYear;
     private String CCV;
     private TPDLinePay tpdLinePay;
+    private TPDCard.CardType[] allowedNetworks = new TPDCard.CardType[]{TPDCard.CardType.Visa
+            , TPDCard.CardType.MasterCard
+            , TPDCard.CardType.JCB
+            , TPDCard.CardType.AmericanExpress};
+    private TPDCard.AuthMethod[] allowedAuthMethods = new TPDCard.AuthMethod[]{TPDCard.AuthMethod.Cryptogram3DS};
+    private static final int REQUEST_READ_PHONE_STATE = 101;
+    private static final int LOAD_PAYMENT_DATA_REQUEST_CODE = 102;
+    private TPDGooglePay tpdGooglePay;
+    private PaymentData paymentData;
+
 
     private final HashMap<TPDCard.CardType, Integer> cardTypes = new HashMap<TPDCard.CardType, Integer>() {{
         put(TPDCard.CardType.Unknown, -1);
@@ -59,7 +84,6 @@ public class TapPayModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void setup(int appID, String appKey, String serverTypeString) {
-
         TPDServerType serverType = serverTypeString.equals("production") ? TPDServerType.Production : TPDServerType.Sandbox;
 
         TPDSetup.initInstance(this.reactContext,
@@ -223,6 +247,64 @@ public class TapPayModule extends ReactContextBaseJavaModule {
                 promise.reject("Fail", message);
             }
         });
+    }
+
+    @ReactMethod
+    public void getGooglePayPrime(final Promise promise) {
+        TPDMerchant tpdMerchant = new TPDMerchant();
+        tpdMerchant.setSupportedNetworks(allowedNetworks);
+        tpdMerchant.setMerchantName(Constants.TEST_MERCHANT_NAME);
+        tpdMerchant.setSupportedAuthMethods(allowedAuthMethods);
+
+        TPDConsumer tpdConsumer = new TPDConsumer();
+        tpdConsumer.setPhoneNumberRequired(false);
+        tpdConsumer.setShippingAddressRequired(false);
+        tpdConsumer.setEmailRequired(false);
+
+
+        tpdGooglePay = new TPDGooglePay(this.reactContext.getCurrentActivity(), tpdMerchant, tpdConsumer);
+        tpdGooglePay.isGooglePayAvailable(new TPDGooglePayListener() {
+            @Override
+            public void onReadyToPayChecked(boolean b, String s) {
+                if (b) {
+                    tpdGooglePay.requestPayment(TransactionInfo.newBuilder()
+                            .setTotalPriceStatus(WalletConstants.TOTAL_PRICE_STATUS_NOT_CURRENTLY_KNOWN)
+                            .setCurrencyCode("TWD")
+                            .build(), LOAD_PAYMENT_DATA_REQUEST_CODE);
+                    tpdGooglePay.getPrime();
+
+                }
+            }
+        });
+
+    }
+    @Override
+    public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
+        switch (requestCode) {
+            case LOAD_PAYMENT_DATA_REQUEST_CODE:
+                switch (resultCode) {
+                    case Activity.RESULT_OK:
+                        confirmBTN.setEnabled(true);
+                        paymentData = PaymentData.getFromIntent(data);
+                        revealPaymentInfo(paymentData);
+                        break;
+                    case Activity.RESULT_CANCELED:
+                        confirmBTN.setEnabled(false);
+                        showMessage("Canceled by User");
+                        break;
+                    case AutoResolveHelper.RESULT_ERROR:
+                        confirmBTN.setEnabled(false);
+                        Status status = AutoResolveHelper.getStatusFromIntent(data);
+                        Log.d(TAG, "AutoResolveHelper.RESULT_ERROR : " + status.getStatusCode() + " , message = " + status.getStatusMessage());
+                        showMessage(status.getStatusCode() + " , message = " + status.getStatusMessage());
+                        break;
+                    default:
+                        // Do nothing.
+                }
+                break;
+            default:
+                // Do nothing.
+        }
     }
 
     @ReactMethod

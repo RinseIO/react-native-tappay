@@ -80,4 +80,6 @@ dependencies {
     //noinspection GradleDynamicVersion
     implementation 'com.facebook.react:react-native:+'  // From node_modules
     implementation(name: 'tpdirect', ext: 'aar')
+    implementation 'com.google.android.gms:play-services-wallet:16.0.0'
+    //implementation 'com.android.support:appcompat-v7:24.1.1'
 }
